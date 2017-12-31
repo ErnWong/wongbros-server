@@ -1,6 +1,9 @@
 # OpenRCT2 downloaded binaries
 bin
 
+# Current downloaded version
+download-id.txt
+
 # Logs
 logs
 *.log
