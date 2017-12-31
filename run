@@ -1,0 +1,102 @@
+#!/usr/bin/env node
+
+const util = require('util');
+const fs = require('fs');
+const http = require('http');
+const request = require('request');
+const requestPromise = require('request-promise-native');
+const crypto = require('crypto');
+
+const extract = util.promosify(require('extract-zip'));
+const rimraf = util.promisify(require('rimraf'));
+const readFile = util.promisify(fs.readFile);
+const writeFile = util.promisify(fs.writeFile);
+const unlink = util.promisify(fs.unlink);
+
+const BIN_DIR = 'bin';
+const VERSION_FILE = 'download-id.txt';
+const ARCHIVE_FILE = 'latest.zip';
+const API_GET_LATEST_DOWNLOAD = {
+  uri: 'https://openrct2.org/altapi/',
+  qs: {
+    command: 'get-latest-download',
+    flavourId: '6',
+    gitBranch: 'develop'
+  },
+  json: true
+};
+
+async function startServer() {
+  await ensureUpdate();
+}
+
+async function ensureUpdate() {
+  try {
+
+    console.log('Checking for latest version');
+    const latestInfo = await requestPromise(API_GET_LATEST_DOWNLOAD);
+    const latestVersion = latestInfo.downloadId.toString();
+
+    let currentVersion = '';
+    try {
+      console.log('Checking current version');
+      currentVersion = await readFile(VERSION_FILE, 'utf8');
+    } catch (err) {
+      console.error('Error loading current version number:');
+      console.error(err);
+      console.error('Going ahead with update');
+    }
+
+    if (currentVersion === latestVersion) {
+      console.log('Current version is up to date');
+      return;
+    }
+
+    console.log('Newer version available. Downloading');
+    await downloadOpenRCT2(info);
+
+    console.log('Extracting download');
+    await rimraf(BIN_DIR);
+    await extract(ARCHIVE_FILE, {dir: BIN_DIR});
+    await unlink(ARCHIVE_FILE);
+
+    console.log('Updating current version number');
+    await writeFile(VERSION_FILE, latestVersion);
+
+  } catch (err) {
+    console.error('Error during update attempt:');
+    console.error(err);
+  }
+}
+
+function downloadOpenRCT2(info) {
+  return new Promise((resolve, reject) => {
+    http.get(info.url, (res) => {
+
+      const writeStream = fs.createWriteStream(ARCHIVE_FILE);
+      const hash = crypto.createHash('sha256');
+
+      res.on('data', (chunk) => {
+        writeStream.write(chunk);
+        hash.update(chunk);
+      });
+
+      res.on('end', () => {
+        if (hash.digest('hex') !== info.fileHash) {
+          reject(new Error(
+            'Invalid download: hash do not agree.\nExpect: ' +
+            info.fileHash +
+            '\nActual: ' +
+            hash.digest('hex'))
+          );
+        }
+        else resolve();
+      });
+
+    }).on('error', (err) => {
+      reject(new Error(err));
+    });
+  });
+}
+
+startServer();
