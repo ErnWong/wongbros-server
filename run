@@ -1,21 +1,22 @@
 #!/usr/bin/env node
 
 const util = require('util');
+const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const request = require('request');
 const requestPromise = require('request-promise-native');
 const crypto = require('crypto');
 
-const extract = util.promosify(require('extract-zip'));
+const extract = util.promisify(require('extract-zip'));
 const rimraf = util.promisify(require('rimraf'));
 const readFile = util.promisify(fs.readFile);
 const writeFile = util.promisify(fs.writeFile);
 const unlink = util.promisify(fs.unlink);
 
-const BIN_DIR = 'bin';
-const VERSION_FILE = 'download-id.txt';
-const ARCHIVE_FILE = 'latest.zip';
+const BIN_DIR = path.resolve('bin');
+const VERSION_FILE = path.resolve('download-id.txt');
+const ARCHIVE_FILE = path.resolve('latest.zip');
 const API_GET_LATEST_DOWNLOAD = {
   uri: 'https://openrct2.org/altapi/',
   qs: {
@@ -53,7 +54,7 @@ async function ensureUpdate() {
     }
 
     console.log('Newer version available. Downloading');
-    await downloadOpenRCT2(info);
+    await downloadOpenRCT2(latestInfo);
 
     console.log('Extracting download');
     await rimraf(BIN_DIR);
