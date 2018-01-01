@@ -7,21 +7,31 @@ const http = require('http');
 const request = require('request');
 const requestPromise = require('request-promise-native');
 const crypto = require('crypto');
+const readline = require('readline');
+const sanitizeFilename = require('sanitize-filename');
+const moment = require('moment');
 
+const {spawn} = require('child_process');
 const extract = util.promisify(require('extract-zip'));
 const rimraf = util.promisify(require('rimraf'));
+const readdir = util.promisify(fs.readdir);
 const readFile = util.promisify(fs.readFile);
 const writeFile = util.promisify(fs.writeFile);
 const unlink = util.promisify(fs.unlink);
 
 const BIN_DIR = path.resolve('bin');
-const VERSION_FILE = path.resolve('download-id.txt');
+const USER_DATA_PATH = path.resolve('data');
+const SAVE_DIR = path.resolve(USER_DATA_PATH,'save/wongbros');
+const EXE_FILE = path.resolve(BIN_DIR, 'openrct2.exe');
+const VERSION_FILE = path.resolve('current-version.txt');
 const ARCHIVE_FILE = path.resolve('latest.zip');
+
+const OPENRCT2_FLAVOUR = '6';
 const API_GET_LATEST_DOWNLOAD = {
   uri: 'https://openrct2.org/altapi/',
   qs: {
     command: 'get-latest-download',
-    flavourId: '6',
+    flavourId: OPENRCT2_FLAVOUR,
     gitBranch: 'develop'
   },
   json: true
@@ -29,6 +39,78 @@ const API_GET_LATEST_DOWNLOAD = {
 
 async function startServer() {
   await ensureUpdate();
+
+  console.log("Finding latest game save");
+  const files = await readdir(SAVE_DIR);
+  const saveFile = path.resolve(SAVE_DIR, files.sort().pop());
+  console.log(`File: ${saveFile}`);
+
+  console.log("Good to go. Firing up the server...");
+  const serverProcess = spawn(EXE_FILE, [
+    'host', saveFile,
+    '--port', '11753',
+    '--user-data-path', USER_DATA_PATH,
+    '--headless'
+  ], {
+    detached: true
+    //stdio: 'pipe'
+  });
+  serverProcess.unref();
+  process.exit(0);
+
+  serverProcess.on('close', (code) => {
+    console.log(`Exit code: ${code}`);
+  });
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    prompt: 'WONGBROS>'
+  });
+
+  rl.prompt();
+
+  rl.on('line', (line) => {
+    line = line.trim().toLowerCase().split(/\s+/);
+    switch (line[0]) {
+      case '':
+        break;
+      case 'help':
+        console.log('Supported commands:');
+        console.log('    help           - Displays what you\'re seeing right now.');
+        console.log('    quit           - Stops the server, discarding changes.');
+        // console.log('    save [comment] - Saves current game with optional comment');
+        // console.log('                     as a way to remember the save file');
+        // console.log('    restart        - Discards current changes and restarts');
+        // console.log('                     server.');
+        break;
+      case 'quit':
+        quit();
+        break;
+        /*
+      case 'save':
+        line[0] = '';
+        const saveComment = sanitizeFilename(line.join('-'));
+        const timestamp = moment.utc().format('YYYY-MM-DDTHHmmss[Z]');
+        const filename = `Save-${timestamp}${saveComment}.SV6`;
+        console.log(`Unimplemented: save to ${filename}`);
+        break;
+        */
+      default:
+        console.log(`Unrecognized command: ${line[0]}`);
+        console.log('Enter \'help\' for a list of commands');
+        break;
+    }
+    rl.prompt();
+  });
+
+  rl.on('close', quit);
+
+  function quit() {
+    serverProcess.kill();
+    console.log('Good bye');
+    process.exit(0);
+  }
 }
 
 async function ensureUpdate() {
@@ -36,19 +118,20 @@ async function ensureUpdate() {
 
     console.log('Checking for latest version');
     const latestInfo = await requestPromise(API_GET_LATEST_DOWNLOAD);
-    const latestVersion = latestInfo.downloadId.toString();
+    const latestDownloadId = latestInfo.downloadId.toString();
 
-    let currentVersion = '';
+    let currentDownloadId = '';
+    let currentFlavour = '';
     try {
       console.log('Checking current version');
-      currentVersion = await readFile(VERSION_FILE, 'utf8');
+      [currentDownloadId, currentFlavour] = (await readFile(VERSION_FILE, 'utf8')).split('\n');
     } catch (err) {
       console.error('Error loading current version number:');
       console.error(err);
       console.error('Going ahead with update');
     }
 
-    if (currentVersion === latestVersion) {
+    if (currentDownloadId === latestDownloadId && currentFlavour == OPENRCT2_FLAVOUR) {
       console.log('Current version is up to date');
       return;
     }
@@ -62,7 +145,7 @@ async function ensureUpdate() {
     await unlink(ARCHIVE_FILE);
 
     console.log('Updating current version number');
-    await writeFile(VERSION_FILE, latestVersion);
+    await writeFile(VERSION_FILE, [latestDownloadId, OPENRCT2_FLAVOUR].join('\n'));
 
   } catch (err) {
     console.error('Error during update attempt:');

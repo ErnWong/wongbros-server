@@ -1,8 +1,9 @@
-# OpenRCT2 downloaded binaries
+# OpenRCT2 state directories
 bin
+data
 
 # Current downloaded version
-download-id.txt
+current-version.txt
 
 # Logs
 logs
