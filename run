@@ -12,21 +12,37 @@ const sanitizeFilename = require('sanitize-filename');
 const moment = require('moment');
 
 const {spawn} = require('child_process');
-const extract = util.promisify(require('extract-zip'));
+const extractZip = util.promisify(require('extract-zip'));
+const extractTar = require('tar').x;
 const rimraf = util.promisify(require('rimraf'));
 const readdir = util.promisify(fs.readdir);
 const readFile = util.promisify(fs.readFile);
 const writeFile = util.promisify(fs.writeFile);
 const unlink = util.promisify(fs.unlink);
+const mkdir = util.promisify(fs.mkdir);
 
+const IS_LINUX = !process.argv.includes('windows');
+const RUN = !process.argv.includes('update');
 const BIN_DIR = path.resolve('bin');
 const USER_DATA_PATH = path.resolve('data');
 const SAVE_DIR = path.resolve(USER_DATA_PATH,'save/wongbros');
-const EXE_FILE = path.resolve(BIN_DIR, 'openrct2.exe');
+const EXE_FILE = path.resolve(BIN_DIR,
+  IS_LINUX ?
+  'OpenRCT2/openrct2-cli':
+  'openrct2.exe');
 const VERSION_FILE = path.resolve('current-version.txt');
-const ARCHIVE_FILE = path.resolve('latest.zip');
+const ARCHIVE_FILE = path.resolve(IS_LINUX ? 'latest.tar.gz' : 'latest.zip');
 
-const OPENRCT2_FLAVOUR = '6';
+const extract = IS_LINUX ?
+  async function (archivePath, {dir}) {
+    await mkdir(dir);
+    await extractTar({
+      cwd: dir,
+      file: archivePath
+    });
+  } :
+  extractZip;
+const OPENRCT2_FLAVOUR = IS_LINUX ? '9' : '6';
 const API_GET_LATEST_DOWNLOAD = {
   uri: 'https://openrct2.org/altapi/',
   qs: {
@@ -40,37 +56,45 @@ const API_GET_LATEST_DOWNLOAD = {
 async function startServer() {
   await ensureUpdate();
 
+  if (!RUN) return;
+
   console.log("Finding latest game save");
   const files = await readdir(SAVE_DIR);
   const saveFile = path.resolve(SAVE_DIR, files.sort().pop());
   console.log(`File: ${saveFile}`);
 
   console.log("Good to go. Firing up the server...");
+  console.log("--------------------------------------------------------------------------------");
   const serverProcess = spawn(EXE_FILE, [
     'host', saveFile,
     '--port', '11753',
     '--user-data-path', USER_DATA_PATH,
     '--headless'
   ], {
-    detached: true
-    //stdio: 'pipe'
+    //detached: true
+    stdio: [
+      'ignore',
+      process.stdout,
+      process.stderr
+    ]
   });
-  serverProcess.unref();
-  process.exit(0);
+  // serverProcess.unref();
+  // process.exit(0);
 
   serverProcess.on('close', (code) => {
     console.log(`Exit code: ${code}`);
+    quit();
   });
 
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-    prompt: 'WONGBROS>'
+    prompt: ''
   });
 
   rl.prompt();
 
-  rl.on('line', (line) => {
+  rl.on('line', async (line) => {
     line = line.trim().toLowerCase().split(/\s+/);
     switch (line[0]) {
       case '':
@@ -79,6 +103,7 @@ async function startServer() {
         console.log('Supported commands:');
         console.log('    help           - Displays what you\'re seeing right now.');
         console.log('    quit           - Stops the server, discarding changes.');
+        console.log('    check-port     - Verifies server visibility.');
         // console.log('    save [comment] - Saves current game with optional comment');
         // console.log('                     as a way to remember the save file');
         // console.log('    restart        - Discards current changes and restarts');
@@ -86,6 +111,65 @@ async function startServer() {
         break;
       case 'quit':
         quit();
+        break;
+      case 'check-port':
+        let good = true;
+
+        let result = await requestPromise({
+          method: 'POST',
+          uri: 'http://www.portchecktool.com/',
+          form: {
+            submit: 'Check your port',
+            port: '11753'
+          }
+        });
+
+        if(typeof result !== 'string') result = '';
+
+        result = result.toLowerCase();
+        if (result.includes('success')) {
+          console.log('Service can be seen through public IP');
+        }
+        else if (result.includes('problem')) {
+          console.log('Service cannot be seen through public IP');
+          good = false;
+        }
+        else {
+          console.log('Port status unknown');
+          good = false;
+        }
+        result = await requestPromise({
+          method: 'POST',
+          uri: 'https://www.traccar.org/port-check/',
+          form: {
+            address: 'wongbros.hopto.org',
+            port: 11753
+          }
+        });
+
+        if(typeof result !== 'string') result = '';
+
+        result = result.toLowerCase();
+
+        if (result.includes('open')) {
+          console.log('Service can be seen through wongbros.hopto.org');
+        }
+        else if (result.includes('closed')) {
+          console.log('Service cannot be seen through wongbros.hopto.org');
+          good = false;
+        }
+        else {
+          console.log('Port status unknown');
+          good = false;
+        }
+
+        console.log('Done checking port:');
+        if (good) {
+          console.log('Everything looks good');
+        }
+        else {
+          console.log('Something might be wrong');
+        }
         break;
         /*
       case 'save':
