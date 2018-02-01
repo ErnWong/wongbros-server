@@ -21,8 +21,8 @@ const writeFile = util.promisify(fs.writeFile);
 const unlink = util.promisify(fs.unlink);
 const mkdir = util.promisify(fs.mkdir);
 
-const IS_LINUX = !process.argv.includes('windows');
-const RUN = !process.argv.includes('update');
+const IS_LINUX = !process.argv.includes('--windows');
+const RUN = !process.argv.includes('--update');
 const BIN_DIR = path.resolve('bin');
 const USER_DATA_PATH = path.resolve('data');
 const SAVE_DIR = path.resolve(USER_DATA_PATH,'save/wongbros');
